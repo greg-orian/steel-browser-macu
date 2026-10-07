@@ -26,20 +26,35 @@ Every message added by this overlay has `schema_version: 1`.
 
 | Message | When it is emitted | Safe fields |
 | --- | --- | --- |
-| `steel:connecting` | Immediately before an active tab's WebSocket is constructed | `schema_version`, `type` |
-| `steel:connected` | The active tab's WebSocket opens | `schema_version`, `type` |
-| `navigation` | After the first successful JPEG draw, once per tab and only while that tab is active | `schema_version`, `type` |
-| `steel:error` | The active tab's WebSocket reports an error | `schema_version`, `type` |
-| `steel:disconnected` | An active tab connection closes abnormally without a prior error and was not intentionally closed | `schema_version`, `type` |
+| `steel:connecting` | Immediately before each active-tab WebSocket attempt | `schema_version`, `type` |
+| `steel:connected` | The current active-tab WebSocket opens | `schema_version`, `type` |
+| `navigation` | After the first successful JPEG draw of each connection epoch, while that tab is active | `schema_version`, `type` |
+| `steel:error` | Recovery is exhausted after a connection error or timeout | `schema_version`, `type` |
+| `steel:disconnected` | Recovery is exhausted after abnormal connection closes without an error | `schema_version`, `type` |
 | `steel:state` | In reply to `steel:get-state` from `window.parent` | `schema_version`, `type`, `state`, positive dimensions when ready, and a safe `probe_id` echoed when supplied |
 
 `steel:get-state` requests must carry `schema_version: 1`. `probe_id` is
 accepted only as a string of at most 128 characters or a safe integer.
 Requests from any window other than `window.parent` are ignored.
 
-If constructing an active tab's WebSocket throws synchronously, the player
-emits exactly one sanitized `steel:error` and rethrows the original exception.
-The error object is never added to the message.
+Each page has an independent transport controller. After the initial attempt it
+retries at 500 ms, 1 s, 2 s, and 5 s with bounded ±20% jitter. A socket has 10
+seconds to open, and an entire recovery sequence is limited to 30 seconds.
+Opening a socket does not reset that budget: only decoding and drawing its first
+JPEG proves recovery. The existing canvas and last successfully drawn frame are
+kept visible while retries run.
+
+Every socket receives an internal epoch. Open, error, close, message, and image
+decode callbacks from older epochs are ignored, and an error followed by close
+is one failure. The player emits a single sanitized terminal marker only after
+recovery is exhausted; constructor failures and timeouts enter the same bounded
+recovery path. Switching or closing a tab and unloading the player cancel even
+CONNECTING sockets and pending timers without emitting a terminal marker. A
+clean provider close is likewise treated as an intentional session end; only
+abnormal closes enter recovery. Provider-side tab removal is local-only, while
+manual close retains Steel's last-tab rule and notifies the provider once. The
+tab-discovery channel uses the same retry controller but stays silent to the
+parent frame.
 
 Only `steel:state` replies contain the `state` field. A successful JPEG draw
 updates that replay state to `ready` with positive dimensions, but does not
@@ -63,8 +78,9 @@ npm.cmd test
 On macOS or Linux, `npm test` is equivalent.
 
 The tests cover exact-hash and anchor drift failures, deterministic output,
-message ordering, first-frame gating, state replay, sensitive-field absence,
-and error/intentional-close suppression.
+message ordering, retry timing and jitter, epoch-stale callback rejection,
+first-frame budget reset, retained-frame recovery, state replay,
+sensitive-field absence, and intentional cancellation.
 
 ## Build locally
 
