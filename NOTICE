@@ -1,0 +1,10 @@
+Steel Browser MACU overlay
+
+This product includes software from Steel Browser
+(https://github.com/steel-dev/steel-browser), licensed under the Apache
+License, Version 2.0.
+
+The overlay modifies Steel's live-session-streamer template to add a
+sanitized, versioned parent-frame lifecycle contract. The modification does
+not include page URLs, session or page identifiers, credentials, WebSocket
+endpoints, error text, or close codes in its lifecycle messages.
